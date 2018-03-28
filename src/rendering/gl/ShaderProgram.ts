@@ -1,4 +1,4 @@
-import {vec4, mat4} from 'gl-matrix';
+import {vec2, vec4, mat4} from 'gl-matrix';
 import Drawable from './Drawable';
 import Texture from './Texture';
 import {gl} from '../../globals';
@@ -34,6 +34,9 @@ class ShaderProgram {
   unifProj: WebGLUniformLocation;
   unifColor: WebGLUniformLocation;
   unifTime: WebGLUniformLocation;
+  unifSize: WebGLUniformLocation;
+  unifViewInv : WebGLUniformLocation;
+  unifThresh : WebGLUniformLocation;
 
   unifTexUnits: Map<string, WebGLUniformLocation>;
 
@@ -59,6 +62,9 @@ class ShaderProgram {
     this.unifProj = gl.getUniformLocation(this.prog, "u_Proj");
     this.unifColor = gl.getUniformLocation(this.prog, "u_Color");
     this.unifTime = gl.getUniformLocation(this.prog, "u_Time")
+    this.unifSize = gl.getUniformLocation(this.prog, "u_Size");
+    this.unifViewInv = gl.getUniformLocation(this.prog, "u_ViewInv");
+    this.unifThresh = gl.getUniformLocation(this.prog, "u_Threshold");
 
     this.unifTexUnits = new Map<string, WebGLUniformLocation>();
   }
@@ -120,6 +126,11 @@ class ShaderProgram {
     if (this.unifView !== -1) {
       gl.uniformMatrix4fv(this.unifView, false, vp);
     }
+    if(this.unifViewInv !== -1) {
+      let viewinv : mat4 = mat4.create();
+      mat4.invert(viewinv, vp);
+      gl.uniformMatrix4fv(this.unifViewInv, false, viewinv);
+    }
   }
 
   setProjMatrix(vp: mat4) {
@@ -136,12 +147,26 @@ class ShaderProgram {
     }
   }
 
+  setSize(size : vec2) {
+    this.use();
+    if(this.unifSize !== -1) {
+      gl.uniform2fv(this.unifSize, size);
+    }
+  }
+
   setTime(t: number) {
     this.use();
     if (this.unifTime !== -1) {
       gl.uniform1f(this.unifTime, t);
     }
   }
+
+  setThreshold(t : number) {
+		this.use();
+		if(this.unifThresh !== -1) {
+			gl.uniform1f(this.unifThresh, t);
+		}
+	}
 
   draw(d: Drawable) {
     this.use();

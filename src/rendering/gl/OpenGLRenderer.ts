@@ -1,4 +1,4 @@
-import {mat4, vec4, vec3} from 'gl-matrix';
+import {vec2, mat4, vec4, vec3} from 'gl-matrix';
 import Drawable from './Drawable';
 import Camera from '../../Camera';
 import {gl} from '../../globals';
@@ -6,6 +6,24 @@ import ShaderProgram, {Shader} from './ShaderProgram';
 import PostProcess from './PostProcess'
 import Square from '../../geometry/Square';
 
+
+// gui parameters
+let bloomThresh = 0.5;
+export function setBloomThresh(t : number) {
+  bloomThresh = 1 - t;
+}
+let dof = 30.0;
+export function setDOF(d : number) {
+  dof = d;
+}
+let radius = 7;
+export function setRadius(r : number) {
+  radius = r;
+}
+let level = 20;
+export function setLevel(l : number) {
+  level = l;
+}
 
 class OpenGLRenderer {
   gBuffer: WebGLFramebuffer; // framebuffer for deferred rendering
@@ -43,6 +61,23 @@ class OpenGLRenderer {
     new Shader(gl.FRAGMENT_SHADER, require('../../shaders/tonemap-frag.glsl'))
     );
 
+  copyPass : PostProcess = new PostProcess(
+    new Shader(gl.FRAGMENT_SHADER, require('../../shaders/copy-frag.glsl'))
+  );
+
+  // occlusion prepass
+  opBuffer : WebGLFramebuffer;
+  opTarget : WebGLTexture;
+  // opShader : ShaderProgram =  new ShaderProgram([
+  //   new Shader(gl.VERTEX_SHADER, require('../../standard-vert.glsl')),
+  //   new Shader(gl.FRAGMENT_SHADER, require('../../shaders/standard-frag.glsl')),
+  // ]);
+
+  // oil paint
+  oilPass : PostProcess = new PostProcess(
+    new Shader(gl.FRAGMENT_SHADER, require('../../shaders/oilpaint-frag.glsl'))
+  );
+
 
   add8BitPass(pass: PostProcess) {
     this.post8Passes.push(pass);
@@ -57,19 +92,25 @@ class OpenGLRenderer {
   constructor(public canvas: HTMLCanvasElement) {
     this.currentTime = 0.0;
     this.gbTargets = [undefined, undefined, undefined];
+
+    // two buffers for efficiently swaping (reading/drawing)
     this.post8Buffers = [undefined, undefined];
     this.post8Targets = [undefined, undefined];
     this.post8Passes = [];
 
-    this.post32Buffers = [undefined, undefined];
-    this.post32Targets = [undefined, undefined];
+    this.post32Buffers = [undefined, undefined, undefined];
+    this.post32Targets = [undefined, undefined, undefined];
     this.post32Passes = [];
 
     // TODO: these are placeholder post shaders, replace them with something good
-    this.add8BitPass(new PostProcess(new Shader(gl.FRAGMENT_SHADER, require('../../shaders/examplePost-frag.glsl'))));
-    this.add8BitPass(new PostProcess(new Shader(gl.FRAGMENT_SHADER, require('../../shaders/examplePost2-frag.glsl'))));
+    // this.add8BitPass(new PostProcess(new Shader(gl.FRAGMENT_SHADER, require('../../shaders/examplePost-frag.glsl'))));
+    // this.add8BitPass(new PostProcess(new Shader(gl.FRAGMENT_SHADER, require('../../shaders/examplePost2-frag.glsl'))));
+    this.add8BitPass(new PostProcess(new Shader(gl.FRAGMENT_SHADER, require('../../shaders/copy-frag.glsl'))));
+
 
     this.add32BitPass(new PostProcess(new Shader(gl.FRAGMENT_SHADER, require('../../shaders/examplePost3-frag.glsl'))));
+    this.add32BitPass(new PostProcess(new Shader(gl.FRAGMENT_SHADER, require('../../shaders/bloom-frag.glsl'))));
+    this.add32BitPass(new PostProcess(new Shader(gl.FRAGMENT_SHADER, require('../../shaders/dof-frag.glsl'))));
 
     if (!gl.getExtension("OES_texture_float_linear")) {
       console.error("OES_texture_float_linear not available");
@@ -104,6 +145,7 @@ class OpenGLRenderer {
     // refresh the gbuffers
     this.gBuffer = gl.createFramebuffer();
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.gBuffer);
+    // gBuffer's fragment color is written into following color attachment of current framebuffer
     gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1, gl.COLOR_ATTACHMENT2]);
 
     for (let i = 0; i < this.gbTargets.length; i ++) {
@@ -114,15 +156,17 @@ class OpenGLRenderer {
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 
+      // 0th of gbTarget is 32-bit texture, while others are 8-bit textures
       if (i == 0) {
         gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, gl.drawingBufferWidth, gl.drawingBufferHeight, 0, gl.RGBA, gl.FLOAT, null);
       }
       else {
         gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.drawingBufferWidth, gl.drawingBufferHeight, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
       }
-
+      // attach a texture to framebuffer
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + i, gl.TEXTURE_2D, this.gbTargets[i], 0);
     }
+
     // depth attachment
     this.depthTexture = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, this.depthTexture);
@@ -139,6 +183,7 @@ class OpenGLRenderer {
         console.error("GL_FRAMEBUFFER_COMPLETE failed, CANNOT use FBO[0]\n");
     }
 
+    // complete set up for gBuffer, bind gl.FRAMEBUFFER to null
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 
     // create the framebuffers for post processing
@@ -162,6 +207,9 @@ class OpenGLRenderer {
       if (FBOstatus != gl.FRAMEBUFFER_COMPLETE) {
         console.error("GL_FRAMEBUFFER_COMPLETE failed, CANNOT use 8 bit FBO\n");
       }
+    }
+
+    for(let i = 0; i < this.post32Buffers.length; i++) {
 
       // 32 bit buffers have float textures of type gl.RGBA32F
       this.post32Buffers[i] = gl.createFramebuffer()
@@ -208,6 +256,7 @@ class OpenGLRenderer {
   }
 
 
+  // Render the 3D scene into its gBuffer using standard-vert.glsl and standard-frag.glsl
   renderToGBuffer(camera: Camera, gbProg: ShaderProgram, drawables: Array<Drawable>) {
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.gBuffer);
     gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
@@ -226,9 +275,9 @@ class OpenGLRenderer {
     gbProg.setGeometryColor(color);
     gbProg.setViewMatrix(view);
     gbProg.setProjMatrix(proj);
-
     gbProg.setTime(this.currentTime);
 
+    // why there is nothing on the screen since it has already drawn something
     for (let drawable of drawables) {
       gbProg.draw(drawable);
     }
@@ -237,7 +286,13 @@ class OpenGLRenderer {
 
   }
 
+  renderOcclusion(camera: Camera, prog: ShaderProgram, drawables : Array<Drawable>) {
+
+  }
+
+  // render the data in gBuffer into 32-bit post process using deferred-render.glsl
   renderFromGBuffer(camera: Camera) {
+    // tell WebGL to use framebuffer instead of output to screen
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.post32Buffers[0]);
     gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
     gl.disable(gl.DEPTH_TEST);
@@ -259,39 +314,124 @@ class OpenGLRenderer {
   }
 
 
+  // 32-bit post process
+  renderBloom() {
+
+    // generate highlight texture
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.post32Buffers[2]);
+    gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
+    gl.disable(gl.DEPTH_TEST);
+    gl.enable(gl.BLEND);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.post32Targets[0]);
+    this.post32Passes[0].setSize(vec2.fromValues(this.canvas.width, this.canvas.height));
+    this.post32Passes[0].setThreshold(bloomThresh);
+    this.post32Passes[0].draw();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+    
+    // bloom pass
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.post32Buffers[1]);
+    gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
+    gl.disable(gl.DEPTH_TEST);
+    gl.enable(gl.BLEND);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.post32Targets[0]);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, this.post32Targets[2]);
+    this.post32Passes[1].draw();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+    // transfer result texture to target 0
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.post32Buffers[0]);
+    gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
+    gl.disable(gl.DEPTH_TEST);
+    gl.enable(gl.BLEND);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.post32Targets[1]);
+    this.copyPass.draw();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  }
+
+
+  // 32-bit passes
+  renderDOF() {
+
+    // apply DOF
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.post32Buffers[1]);
+    gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
+    gl.disable(gl.DEPTH_TEST);
+    gl.enable(gl.BLEND);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.post32Targets[0]);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, this.gbTargets[0]);
+    this.post32Passes[2].setSize(vec2.fromValues(this.canvas.width, this.canvas.height));
+    this.post32Passes[2].setDOF(dof);
+    this.post32Passes[2].draw();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+    // transfer result texture to target 0
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.post32Buffers[0]);
+    gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
+    gl.disable(gl.DEPTH_TEST);
+    gl.enable(gl.BLEND);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.post32Targets[1]);
+    this.copyPass.draw();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+  }
+
+
+  renderOilPaint() {
+     // apply DOF
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.post8Buffers[1]);
+    gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
+    gl.disable(gl.DEPTH_TEST);
+    gl.enable(gl.BLEND);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.post8Targets[0]);
+    this.oilPass.setSize(vec2.fromValues(this.canvas.width, this.canvas.height));
+    this.oilPass.setRadius(radius);
+    this.oilPass.setLevel(level);
+    this.oilPass.draw();
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+    // transfer result texture to target 0
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.post8Buffers[0]);
+    gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
+    gl.disable(gl.DEPTH_TEST);
+    gl.enable(gl.BLEND);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.post8Targets[1]);
+    this.copyPass.draw();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+  }
+
+
+
+
   // TODO: pass any info you need as args
   renderPostProcessHDR() {
     // TODO: replace this with your post 32-bit pipeline
     // the loop shows how to swap between frame buffers and textures given a list of processes,
     // but specific shaders (e.g. bloom) need specific info as textures
-    let i = 0;
-    for (i = 0; i < this.post32Passes.length; i++){
-      // Pingpong framebuffers for each pass.
-      // In other words, repeatedly flip between storing the output of the
-      // current post-process pass in post32Buffers[1] and post32Buffers[0].
-      gl.bindFramebuffer(gl.FRAMEBUFFER, this.post32Buffers[(i + 1) % 2]);
-
-      gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
-      gl.disable(gl.DEPTH_TEST);
-      gl.enable(gl.BLEND);
-      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-
-      // Recall that each frame buffer is associated with a texture that stores
-      // the output of a render pass. post32Targets is the array that stores
-      // these textures, so we alternate reading from the 0th and 1th textures
-      // each frame (the texture we wrote to in our previous render pass).
-      gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D, this.post32Targets[(i) % 2]);
-
-      this.post32Passes[i].draw();
-
-      // bind default frame buffer
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    }
 
     // apply tonemapping
     // TODO: if you significantly change your framework, ensure this doesn't cause bugs!
     // render to the first 8 bit buffer if there is more post, else default buffer
+    
     if (this.post8Passes.length > 0) {
       gl.bindFramebuffer(gl.FRAMEBUFFER, this.post8Buffers[0]);
     }
@@ -308,10 +448,10 @@ class OpenGLRenderer {
     gl.activeTexture(gl.TEXTURE0);
     // bound texture is the last one processed before
 
-    gl.bindTexture(gl.TEXTURE_2D, this.post32Targets[Math.max(0, i) % 2]);
-
+    gl.bindTexture(gl.TEXTURE_2D, this.post32Targets[0]);
+    
     this.tonemapPass.draw();
-
+    
   }
 
 
@@ -333,13 +473,15 @@ class OpenGLRenderer {
 
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, this.post8Targets[(i) % 2]);
-
+      this.post8Passes[i].setSize(vec2.fromValues(this.canvas.width, this.canvas.height));
       this.post8Passes[i].draw();
 
       // bind default
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     }
   }
+
+
 
 };
 

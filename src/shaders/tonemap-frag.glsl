@@ -14,10 +14,9 @@ void main() {
 	// and performs basic gamma correction.
 	// It does not properly handle HDR values; you must implement that.
 
-	vec3 color = texture(u_frame, fs_UV).xyz;
-	color = min(vec3(1.0), color);
-
-	// gamma correction
-	color = pow(color, vec3(1.0 / 2.2));
-	out_Col = vec4(color, 1.0);
+	vec3 texColor = texture(u_frame, fs_UV).xyz;
+	// texColor = min(vec3(1.0), texColor);
+	texColor *= 2.0;
+	texColor = pow(texColor, vec3(1.0 / 2.2));
+	out_Col = vec4(texColor, 1.0);
 }
