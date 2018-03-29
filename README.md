@@ -41,3 +41,6 @@ Demo Link : https://wanruzhao.github.io/homework-7-deferred-renderer-WanruZhao/
 - GUI
   - Enable and disable post effects
 
+#### Reference
+  - Background: https://www.shadertoy.com/view/4tjGWy
+  - Oil paint: http://supercomputingblog.com/graphics/oil-painting-algorithm/
