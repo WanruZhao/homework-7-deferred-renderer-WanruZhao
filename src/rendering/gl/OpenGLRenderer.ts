@@ -16,11 +16,11 @@ let dof = 30.0;
 export function setDOF(d : number) {
   dof = d;
 }
-let radius = 7;
+let radius = 2.0;
 export function setRadius(r : number) {
   radius = r;
 }
-let level = 20;
+let level = 1.0;
 export function setLevel(l : number) {
   level = l;
 }
@@ -66,8 +66,8 @@ class OpenGLRenderer {
   );
 
   // occlusion prepass
-  opBuffer : WebGLFramebuffer;
-  opTarget : WebGLTexture;
+  // opBuffer : WebGLFramebuffer;
+  // opTarget : WebGLTexture;
   // opShader : ShaderProgram =  new ShaderProgram([
   //   new Shader(gl.VERTEX_SHADER, require('../../standard-vert.glsl')),
   //   new Shader(gl.FRAGMENT_SHADER, require('../../shaders/standard-frag.glsl')),
@@ -105,7 +105,9 @@ class OpenGLRenderer {
     // TODO: these are placeholder post shaders, replace them with something good
     // this.add8BitPass(new PostProcess(new Shader(gl.FRAGMENT_SHADER, require('../../shaders/examplePost-frag.glsl'))));
     // this.add8BitPass(new PostProcess(new Shader(gl.FRAGMENT_SHADER, require('../../shaders/examplePost2-frag.glsl'))));
-    this.add8BitPass(new PostProcess(new Shader(gl.FRAGMENT_SHADER, require('../../shaders/copy-frag.glsl'))));
+    // this.add8BitPass(new PostProcess(new Shader(gl.FRAGMENT_SHADER, require('../../shaders/oilpaint-frag.glsl'))));
+    this.add8BitPass(new PostProcess(new Shader(gl.FRAGMENT_SHADER, require('../../shaders/examplePost-frag.glsl'))));
+
 
 
     this.add32BitPass(new PostProcess(new Shader(gl.FRAGMENT_SHADER, require('../../shaders/examplePost3-frag.glsl'))));
@@ -207,6 +209,8 @@ class OpenGLRenderer {
       if (FBOstatus != gl.FRAMEBUFFER_COMPLETE) {
         console.error("GL_FRAMEBUFFER_COMPLETE failed, CANNOT use 8 bit FBO\n");
       }
+
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     }
 
     for(let i = 0; i < this.post32Buffers.length; i++) {
@@ -227,8 +231,10 @@ class OpenGLRenderer {
 
       FBOstatus = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
       if (FBOstatus != gl.FRAMEBUFFER_COMPLETE) {
-        console.error("GL_FRAMEBUFFER_COMPLETE failed, CANNOT use 8 bit FBO\n");
+        console.error("GL_FRAMEBUFFER_COMPLETE failed, CANNOT use 32 bit FBO\n");
       }
+
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     }
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -309,6 +315,8 @@ class OpenGLRenderer {
       gl.bindTexture(gl.TEXTURE_2D, this.gbTargets[i]);
     }
 
+    this.deferredShader.setSize(vec2.fromValues(this.canvas.width, this.canvas.height));
+    this.deferredShader.setTime(this.currentTime);
     this.deferredShader.draw();
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
@@ -390,20 +398,18 @@ class OpenGLRenderer {
 
 
   renderOilPaint() {
-     // apply DOF
+     // apply oil paint
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.post8Buffers[1]);
     gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
     gl.disable(gl.DEPTH_TEST);
     gl.enable(gl.BLEND);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.post8Targets[0]);
     this.oilPass.setSize(vec2.fromValues(this.canvas.width, this.canvas.height));
     this.oilPass.setRadius(radius);
     this.oilPass.setLevel(level);
     this.oilPass.draw();
-
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 
     // transfer result texture to target 0
@@ -460,6 +466,7 @@ class OpenGLRenderer {
     // TODO: replace this with your post 8-bit pipeline
     // the loop shows how to swap between frame buffers and textures given a list of processes,
     // but specific shaders (e.g. motion blur) need specific info as textures
+
     for (let i = 0; i < this.post8Passes.length; i++){
       // pingpong framebuffers for each pass
       // if this is the last pass, default is bound
@@ -474,6 +481,8 @@ class OpenGLRenderer {
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, this.post8Targets[(i) % 2]);
       this.post8Passes[i].setSize(vec2.fromValues(this.canvas.width, this.canvas.height));
+      this.post8Passes[i].setRadius(radius);
+      this.post8Passes[i].setLevel(level);
       this.post8Passes[i].draw();
 
       // bind default

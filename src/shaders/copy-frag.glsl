@@ -5,10 +5,9 @@ in vec2 fs_UV;
 out vec4 out_Col;
 
 uniform sampler2D u_frame;
-uniform float u_Time;
 
 // copy texture
 void main() {
 	
-	out_Col = texture(u_frame, fs_UV);
+	out_Col = vec4(texture(u_frame, fs_UV).xyz, 1.0);
 }

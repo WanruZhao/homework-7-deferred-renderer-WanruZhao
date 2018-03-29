@@ -1,4 +1,4 @@
-import {vec2, vec4, mat4} from 'gl-matrix';
+import {vec2, vec4, mat4, vec3} from 'gl-matrix';
 import Drawable from './Drawable';
 import Texture from './Texture';
 import {gl} from '../../globals';
@@ -37,6 +37,7 @@ class ShaderProgram {
   unifSize: WebGLUniformLocation;
   unifViewInv : WebGLUniformLocation;
   unifThresh : WebGLUniformLocation;
+  unifLightMVP : WebGLUniformLocation;
 
   unifTexUnits: Map<string, WebGLUniformLocation>;
 
@@ -65,6 +66,7 @@ class ShaderProgram {
     this.unifSize = gl.getUniformLocation(this.prog, "u_Size");
     this.unifViewInv = gl.getUniformLocation(this.prog, "u_ViewInv");
     this.unifThresh = gl.getUniformLocation(this.prog, "u_Threshold");
+    this.unifLightMVP = gl.getUniformLocation(this.prog, "u_LightMVP");
 
     this.unifTexUnits = new Map<string, WebGLUniformLocation>();
   }
@@ -158,6 +160,17 @@ class ShaderProgram {
     this.use();
     if (this.unifTime !== -1) {
       gl.uniform1f(this.unifTime, t);
+    }
+  }
+
+  setLightMVP() {
+    this.use();
+    if (this.unifLightMVP !== -1) {
+      let lightDir = vec3.fromValues(-1, 0, 0);
+      let lProMat = mat4.ortho(mat4.create(), -100, 100, -100, 100, -100, 100);
+      let lViewMat = mat4.lookAt(mat4.create(), lightDir, vec3.fromValues(0, 0, 0), vec3.fromValues(0, 1, 0));
+      let lMVP = mat4.multiply(mat4.create(), lProMat, lViewMat);
+      //gl.uniformMatrix4fv(this.unifLightMVP, false, lMVP[0][0], 0, 0);
     }
   }
 

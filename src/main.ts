@@ -31,8 +31,8 @@ const controls = {
   DOF : true,
   DOFDistance : 30.0,
   OilPaint : false,
-  Radius : 7,
-  Level : 20,
+  Radius : 3,
+  Sigma : 1,
 };
 
 let isBloom = true;
@@ -65,13 +65,13 @@ function loadScene() {
   square = new Square(vec3.fromValues(0, 0, 0));
   square.create();
 
-  mesh0 = new Mesh(obj0, vec3.fromValues(0, 0, 0));
+  mesh0 = new Mesh(obj0, vec3.fromValues(0, -10, 0));
   mesh0.create();
 
-  mesh1 = new Mesh(obj0, vec3.fromValues(0, 0, -10));
+  mesh1 = new Mesh(obj0, vec3.fromValues(0, -10, -10));
   mesh1.create();
 
-  mesh2 = new Mesh(obj0, vec3.fromValues(0, 0, -20));
+  mesh2 = new Mesh(obj0, vec3.fromValues(0, -10, -20));
   mesh2.create();
 
   tex0 = new Texture('../resources/textures/wahoo.bmp')
@@ -87,9 +87,6 @@ function main() {
   stats.domElement.style.left = '0px';
   stats.domElement.style.top = '0px';
   document.body.appendChild(stats.domElement);
-
-  // Add controls to the gui
-  // const gui = new DAT.GUI();
 
   // get canvas and webgl context
   const gl = <WebGL2RenderingContext> canvas.getContext('webgl2');
@@ -124,17 +121,17 @@ function main() {
   Oil.add(controls, 'OilPaint', false).onChange(function() {
     isOil = controls.OilPaint;
   })
-  Oil.add(controls, 'Radius', 0, 15).step(1).onChange(function() {
+  Oil.add(controls, 'Radius', 0.0, 5.0).step(0.1).onChange(function() {
     setRadius(controls.Radius);
   })
-  Oil.add(controls, 'Level', 15, 30).step(1).onChange(function(){
-    setLevel(controls.Level);
+  Oil.add(controls, 'Sigma', 0.0, 10.0).step(0.5).onChange(function(){
+    setLevel(controls.Sigma);
   })
 
   // Initial call to load scene
   loadScene();
 
-  const camera = new Camera(vec3.fromValues(0, 9, 25), vec3.fromValues(0, 9, 0));
+  const camera = new Camera(vec3.fromValues(0, 0, 25), vec3.fromValues(0, 0, 0));
 
   
   renderer.setClearColor(0, 0, 0, 1);
@@ -173,6 +170,8 @@ function main() {
       renderer.renderDOF();
     }
 
+    
+
     // apply 32-bit post and tonemap from 32-bit color to 8-bit color
     renderer.renderPostProcessHDR();
     // apply 8-bit post and draw
@@ -196,6 +195,11 @@ function main() {
   renderer.setSize(window.innerWidth, window.innerHeight);
   camera.setAspectRatio(window.innerWidth / window.innerHeight);
   camera.updateProjectionMatrix();
+
+
+  // canvas.addEventListener("webglcontextlost", function(event) {
+  //   event.preventDefault();
+  // }, false);
 
   // Start the render loop
   tick();

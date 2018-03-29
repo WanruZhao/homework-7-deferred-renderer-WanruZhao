@@ -55,14 +55,14 @@ class PostProcess extends ShaderProgram {
 	setRadius(d : number) {
 		this.use();
 		if (this.unifRad !== null) {
-			gl.uniform1i(this.unifRad, d);
+			gl.uniform1f(this.unifRad, d);
 		}
 	}
 
 	setLevel(d : number) {
 		this.use();
 		if (this.unifLevel !== null) {
-			gl.uniform1i(this.unifLevel, d);
+			gl.uniform1f(this.unifLevel, d);
 		}
 	}
 
